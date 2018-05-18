@@ -293,7 +293,7 @@ fit %>%
          y = "Fitted")
 ```
 
-The residuals appear iid, and there is no non-linear pattern in the residuals. In addition, the p-values for the intercept and height parameter are both <2e-16, which is significant at a significance level of 0.05. Thus, it is safe to use our linear regression model. The resulting equation is $$reach = -18.067037 + 1.133768 * height$$. This means that for each cm in height, reach increases by 1.13 cm.
+The residuals appear iid, and there is no non-linear pattern in the residuals. In addition, the p-values for the intercept and height parameter are both <2e-16, which is significant at a significance level of 0.05. Thus, it is safe to use our linear regression model. The resulting equation is $$reach = -18.067037 + 1.133768 * height$$ This means that for each cm in height, reach increases by 1.13 cm.
 
 Let's evaluate the performance of our model through the R^2 metric.
 

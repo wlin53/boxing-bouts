@@ -1,0 +1,432 @@
+---
+title: "Exploring the Boxing Bouts Dataset"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE)
+options(warn=-1)
+```
+
+## Introduction
+
+In this tutorial, we will work with the boxing bouts dataset (https://www.kaggle.com/slonsky/boxing-bouts), which includes various information about nearly 400,000 professional boxing matches. We will attempt to answer the following questions (and more) regarding this dataset:
+
+1. Does the older boxer win more often against a younger boxer?
+2. Does the boxer with a longer reach win more often against a boxer with shorter reach? 
+3. Does the taller boxer win more often against a shorter boxer?
+4. How well can we predict the outcome of a fight using ML?
+
+### Inspiration
+
+* There are not many datasets on boxing out there.
+* There are not many analyses on boxing datasets.
+* The federal ban on sports betting has been lifted - can we use ML to predict the winner and make money off of it?
+
+This guide is split into three major parts.
+
+1. Tidying the Data
+2. Exploratory Data Analysis
+3. Machine Learning for Hypothesis Testing
+
+## Tidying the Data
+
+First, let's import the tidyverse package so that we have access to several functions that will help us tidy our dataset. Tidyverse is actually a collection of R packages specfically designed for data science. You can read more about it here: https://www.tidyverse.org/.
+
+The next step is to load the dataset, which is a csv file, into a data frame. Let's take a look at the first few rows in the dataset to figure out what information each observation contains. Note the use of the pip operator (%>%), which takes the LHS as the first parameter input to the RHS. The pipe operator comes from the magrittr package (https://cran.r-project.org/web/packages/magrittr/vignettes/magrittr.html), which is included in tidyverse. The magrittr package has two goals: to decrease development time and improve readability and maintainability of code. We will see this more later on, when we run our data through longer pipelines.
+
+```{r}
+library(tidyverse) # tidying data
+
+dat <- read_csv('bouts_out_new.csv') # load the data
+
+# look at the data
+dat %>%
+  head()
+```
+
+From this output, we see that each observation (row) represents one bout, consisting of boxer A and boxer B. We are given the physical attributes of each boxer as well as their past records in an observation. The result, decision, and judge scorecards are also provided. Note that there is no attribute (column) that identifies the boxer, meaning that our analysis cannot focus on a certain boxer's performance. 
+
+Already, we see that there are missing values in the data, encoded as NA's. Let's see how serious this problem is (how many NA's are there) before we decide how to deal with them. With the summary function, we can look at some basic statistics of each attributes in the dataset. This will allows us to determine the number of missing values (if any) for each attribute, and also detect any potential inconsistencies (mistakes) in the data.
+
+```{r}
+summary(dat)
+```
+
+This output shows that there is a lot of missing data encoded as NA's. For instance, the height_B attribute is missing for 252,787 observations in the dataset. In addition, there are several mistakes in the data. For example, we see that the minimum age is -74, which is definitely not a valid age. We also observe some unreasonable values for height, such as 255 cm, which is over 8 feet tall.
+
+### Dealing with Missing Values
+
+Because there are so many NA's in the dataset, it would not be valid to impute missing values (replace with substituted values such as the mean), because while this process wouldn't affect the mean, it would greatly lower the standard deviation. As a result, we should simply restrict the values of a numeric variable to a reasonable range, which gets rid of NA's at the same time. For example, it doesn't make sense to analyze boxers under the age of 14-15 in professional fights. So, if we set the lower bound for age to 14, we deal with erroneous values such as -74 as well as NA's. We can take a closer look at the data to determine the upper bound for age. Using the filter operation, we can restrict the output to only entities (rows) where boxers are over the age of 60. Using the select operation, we can hone in on the desired attribute(s) (in this case, age_A and age_B columns) so that it's easier to look at.
+
+
+```{r}
+dat %>% 
+  filter(age_A > 60 | age_B > 60) %>%
+  select(age_A, age_B)
+```
+
+From this output, we see that all of the ages over 60 listed are not plausible (i.e. 99, 102, 1817) and therefore must have been errors when scraping the data. These values should not be considered as they will greatly corrupt our later analyses.
+
+Now, we will use the filter operation (and assign the result to the data frame) to obtain only the observations in which boxers are within the age range we constructed. We can also derive sensible ranges for height, weight, and reach based on the summary statistics above and basic knowledge of boxing from the Internet. The filter operation returns a data frame, so we can run multiple filter operations through a pipeline (multiple %>%'s). As stated previously, this makes it clear what each line of code is doing.
+
+```{r}
+dat <- dat %>%
+  filter(age_A >= 14, age_B >= 14, age_A <= 60, age_B <=60) %>% # ages 14-60
+  filter(height_A >= 150, height_B >= 150, height_A <= 225, height_B <= 225) %>% # ~5 to ~7 ft.
+  filter(reach_A >= 150, reach_B >= 150, reach_A <= 250, reach_B <= 250) %>% # ~5 to ~8 ft. 
+  filter(weight_A >= 100, weight_B >= 100) # minimum weight is ~100 lbs, heavyweight is unlimited 
+  
+
+nrow(dat)
+```
+
+We see that we are only left with 7669 observations, a small fraction of the original dataset. But because we are going to use all of these attributes in conjunction to create models and perform classification tasks, missing values would only mess up our constructions and their results. We still have a large number of observations - and now that our data is tidied, we can proceed to perform analyses!
+
+## Exploratory Data Analysis
+
+We can visualize the distribution of numeric variables by plotting histograms and overlaying them with probability density curves. We will use the ggplot2 package, a system for declaratively creating graphics, to create these plots. More can be read about ggplot2 here: http://ggplot2.tidyverse.org/.
+
+We use histograms here because they are great for viewing the distribution of a single numeric variable. Here, we plot the distribution of height, reach, and weight of boxer A.
+
+```{r}
+library(ggplot2) # visualization
+
+theme_update(plot.title = element_text(hjust = 0.5)) # center title
+
+dat %>%
+  ggplot(aes(x=height_A)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=2) +
+    geom_density(alpha=.2, fill="#FF5555") +
+    labs(title="Distribution of Boxer A Height",
+         x = "Height (cm)",
+         y = "Density")
+
+dat %>%
+  ggplot(aes(x=reach_A)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=2) +
+    geom_density(alpha=.2, fill="#FF5555") +
+    labs(title="Distribution of Boxer A Reach",
+         x = "Reach (cm)",
+         y = "Density")
+
+dat %>%
+  ggplot(aes(x=weight_A)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=5) +
+    geom_density(alpha=.2, fill="#FF5555") +
+  labs(title="Distribution of Boxer A Weight",
+         x = "Weights (lbs)",
+         y = "Density")
+```
+
+We can also compare two histograms to see whether their distributions differ. For example, does the distribution of age_A differ from that of age_B?
+
+Note that here, we set the binwidth to 1, so that each bin represents 1 year of age.
+
+```{r}
+dat %>%
+  ggplot(aes(x=age_A)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=1) +
+    geom_density(alpha=.2, fill="#FF5555") +
+    labs(title="Distribution of Boxer A Age",
+         x = "Age",
+         y = "Density")
+
+dat %>%
+  ggplot(aes(x=age_B)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=1) +
+    geom_density(alpha=.2, fill="#FF5555") +
+    labs(title="Distribution of Boxer B Age",
+         x = "Age",
+         y = "Density")
+```
+
+From this output, we see that the distribution of age_A is slightly right-skewed, while the distribution of age_B is relatively symmetric. Let's take this one step further and make another histogram to see how the age difference (age_A - age_B) of competing boxers is distributed.
+
+```{r}
+dat %>%
+  ggplot(aes(x=age_A - age_B)) +
+    geom_histogram(aes(y=..density..), colour="black", fill="white", binwidth=1) +
+    geom_density(alpha=.2, fill="#FF5555") +
+    labs(title="Distribution of Age Difference",
+         x = "Age Difference (years)",
+         y = "Density")
+```
+
+There seems to be a wide distribution of age differences, from 0 to 20 years. With this, let's attempt to answer the question #1: Does the older boxer win more often against a younger boxer?
+
+First, let's create a new variable in the data frame that represents the age difference of boxer A and boxer B (age_A - age_B). Then, let's compute the counts of each of the four cases: older boxer A wins, older boxer B wins, younger boxer A wins, and younger boxer B wins. Because we are concerned about the impact of age difference on winning, let's ignore draws and matches where the boxers are the same age.
+
+```{r}
+dat <- dat %>%
+  mutate(age_diff=age_A-age_B) %>%
+  filter(result != "draw") %>%
+  filter(age_diff != 0)
+
+older_A <- dat %>%
+  group_by(result) %>%
+  filter(age_diff > 0) %>%
+  summarize(count_older_A=n())
+
+older_B <- dat %>%
+  group_by(result) %>%
+  filter(age_diff < 0) %>%
+  summarize(count_older_B=n())
+
+win_counts <- merge(older_A, older_B)
+
+win_counts 
+```
+
+From these results, we observe that the older boxer won (2085 + 436) / (3781 + 436 + 2085 + 578) = 36.64% of the time. This means that the younger boxer won 1 - 0.3664 = 63.36% of the time. 
+
+Let's try to answer a more involved follow-up question: typically how much older/younger is the victorious boxer? 
+
+To answer this, we must group the data by the match result. Then, we can compute the mean age difference in the case that boxer A wins and the case that boxer B wins.
+
+```{r}
+win_age_diff <- dat %>% 
+  group_by(result) %>%
+  summarize(mean_age_diff=mean(age_diff))
+
+win_age_diff
+```
+
+From these results, we observe that on average, when boxer A wins, he is roughly 2.12 years younger than boxer B. When boxer B wins, he is on average 1.38 years younger than boxer A. The sign of these values (+/-) agree with our previous results that the younger boxer wins more often when competing against an older boxer. We can compute a weighted average to get a single value, rather than describing a boxer A and a boxer B, which has no real semantics.
+
+```{r}
+win_AB_counts <- win_counts %>%
+  select(count_older_A, count_older_B) %>%
+  rowSums()
+
+wt_avg <- (-win_age_diff$mean_age_diff[1] * win_AB_counts[1] + 
+            win_age_diff$mean_age_diff[2] * win_AB_counts[2]) / nrow(dat)
+
+wt_avg
+```
+
+This result indicates that the victorious boxer is typically 2 years younger than his opponent.
+
+Let's see if we can confirm our results graphically, through a scatterplot and a stacked density histogram. The scatterplot is used here to visualize the relationship between two numeric variables (in this case, age_A and age_B). A third categorical variable (the result) is mapped to a color aesthetic, so we can clearly tell which boxer won for a given age_A and age_B. The histogram is useful because it directly shows us the distribution of age difference, which is not immediately apparent in the scatterplot (since we did not plot age_diff directly). Using a stacked histogram with the color aesthetic mapping allows us to visualize the ratio of when boxer A wins versus when boxer B wins for individual values of the age difference (i.e. 1 year, 5 year, etc.).
+
+```{r}
+dat %>%
+  ggplot(aes(x=age_A, y=age_B)) +
+    geom_point(aes(color=result)) +
+    geom_abline(color="green") +
+    labs(title="Boxer A Age vs. Boxer B Age",
+         x = "age_A",
+         y = "age_B")
+
+dat %>%
+  ggplot(aes(x=age_diff, y=..density..)) +
+    geom_histogram(aes(fill=result), colour="black", binwidth=1) +
+    labs(title="Distribution of Age Difference and Win Ratio",
+         x = "Age Difference (years)",
+         y = "Density")
+```
+
+We plot the identity line on the scatterplot to mark the region where boxer A is older and the region where boxer B is older.
+Above the line, we see more green dots, meaning that boxer A won despite the fact that boxer B is older. Below the line, we see more blue dots, indicating that a younger boxer B beat an older boxer A.
+
+Viewing this information as a stacked density histogram, we see that the blue bars are more prominent when age_diff is positive, while the red bars are more prominent when age_diff is negative. In fact, there seems to be a trend that, as the age gap increases, the younger boxer is more likely to win.
+
+Now, let's perform a similar analysis with height and reach. Performing this type of analysis on weight would be pointless since competing boxers must be in the same weight class.
+
+```{r}
+dat <- dat %>%
+  mutate(height_diff=height_A-height_B) %>%
+  mutate(reach_diff=reach_A-reach_B)
+
+taller_A <- dat %>%
+  group_by(result) %>%
+  filter(height_diff > 0) %>%
+  summarize(count_taller_A=n())
+
+taller_B <- dat %>%
+  group_by(result) %>%
+  filter(height_diff < 0) %>%
+  summarize(count_taller_B=n())
+
+merge(taller_A, taller_B, by="result")
+
+longer_A <- dat %>%
+  group_by(result) %>%
+  filter(reach_diff > 0) %>%
+  summarize(count_longer_A=n())
+
+longer_B <- dat %>%
+  group_by(result) %>%
+  filter(reach_diff < 0) %>%
+  summarize(count_longer_B=n())
+
+merge(longer_A, longer_B, by="result")
+
+dat %>%
+  group_by(result) %>%
+  summarize(mean(height_diff), mean(reach_diff))
+```
+
+From these results, we observe that the taller boxer wins (3172 + 530) / (2466 + 449 + 530 + 3172) = ~56% of the time and the boxer with longer reach wins (3174 + 526) / (2575 + 426 + 3174 + 526) = ~55% of the time. The winning boxer typically has a 1 cm height/reach advantage over his opponent. This difference is quite small, suggesting that height/reach advantages are typically not the difference maker in many of the fights in this dataset. Because the values for height difference and reach difference are so similar, let's fit a linear regression model to see if height and reach are linearly correlated, and if height is a good linear predictor for reach.
+
+```{r}
+fit <- lm(formula = reach_A ~ height_A, data=dat)
+summary(fit)
+
+dat %>%
+  ggplot(aes(x=height_A, y=reach_A)) +
+    geom_point() +
+    geom_smooth(method=lm) +
+    labs(title="Reach vs. Height",
+         x = "Height (cm)",
+         y = "Reach (cm)")
+```
+
+Before we accept this model, we need to make sure the residuals are iid (independent and identically distributed), and that the underlying relationship is not non-linear.
+
+```{r}
+fit %>%
+  ggplot(aes(x=.fitted, y=.resid)) +
+  geom_point() +
+  labs(title="Residuals vs. Fitted Values",
+         x = "Residual",
+         y = "Fitted")
+```
+
+The residuals appear iid, and there is no non-linear pattern in the residuals. In addition, the p-values for the intercept and height parameter are both <2e-16, which is significant at a significance level of 0.05. Thus, it is safe to use our linear regression model. The resulting equation is $$reach = -18.067037 + 1.133768 * height$$. This means that for each cm in height, reach increases by 1.13 cm.
+
+Let's evaluate the performance of our model through the R^2 metric.
+
+```{r}
+summary(fit)$r.squared
+```
+This value reveals that 79.74% of the variation in reach can be accounted for by the variation in height. 
+
+## Machine Learning for Hypothesis Testing
+
+Let's create a classifier that can predict the outcome of a match (either win_A or win_B) based on age/height/reach difference, and the boxers' prior records (win:loss). 
+
+Because we have a lot of features, let's use a decision tree based method to classify our data. We'll use random forest, an ensemble classifier that constructs ntree decision trees (n is a hyperparameter), each from a random subset of features. This method increases diversity in the trees in attempt to avoid overfitting. You can read about decision trees and random forest here: https://towardsdatascience.com/the-random-forest-algorithm-d457d499ffcd.
+
+Here, we'll compare the performance of two random forest classifiers, one with ntree=16, and the other with ntree=512. The goal is to answer the following: Does the number of trees impact the classification performance of random forest on this data set? We will define performance by various metrics, including accuracy (via error rate) and area under the ROC curve, which plots the true positive rate against the false positive rate. As a result, we'll be able to see how well each RF classifies each of the output classes, and not just their accuracy (which doesn't always give the entire picture). 
+
+This experiment will use 10-fold cross validation across a sample of 2000 bouts (1000 of each output class). Equalizing the class ratio is necessary in our case due to the class imbalance. win_A occurs in 5866 matches, which accounts for roughly 85% of the data. This means that if our classifier simply predicted win_A with probability 1, it would achieve 0.85 accuracy, but have a false positive rate of 1. To avoid this, we will undersample the majority class (win_A) with the number of observations in the minority class (win_B), which is roughly 1000.
+
+Note that there is no need to standardize the data since random forest does not compare the magnitude of features to one another - it is only the range of a feature that is split at each stage.
+
+```{r}
+library(caret)
+library(randomForest)
+
+set.seed(1234)
+dat$result = factor(dat$result)
+
+s1 <- dat %>%
+  filter(result == "win_A") %>%
+  sample_n(1000)
+s2 <- dat %>%
+  filter(result == "win_B") %>%
+  sample_n(1000)
+samp <- rbind(s1, s2)
+
+result_df <- createFolds(samp$result, k=10) %>%
+  # fit models and gather results
+  purrr::imap(function(test_indices, fold_number) {
+    # split into train and test for the fold
+    train_df <- samp %>%
+      slice(-test_indices)
+
+    test_df <- samp %>%
+      slice(test_indices)
+  
+    # fit the two models
+    rf <- randomForest(result ~ age_diff + height_diff + reach_diff + won_A + won_B + lost_A + lost_B + kos_A + kos_B, data=train_df, ntree=16)
+    rf2 <- randomForest(result ~ age_diff + height_diff + reach_diff + won_A + won_B + lost_A + lost_B + kos_A + kos_B, data=train_df, ntree=512)
+
+    # gather results
+    test_df %>%
+      select(observed_label = result) %>%
+      mutate(fold=fold_number) %>%
+      mutate(prob_positive_rf = predict(rf, newdata=test_df, type="prob")[,"win_B"]) %>%
+      # add predicted labels for rf using a 0.5 probability cutoff
+      mutate(predicted_label_rf = ifelse(prob_positive_rf > 0.5, "win_B", "win_A")) %>%
+      mutate(prob_positive_rf2 = predict(rf2, newdata=test_df, type="prob")[,"win_B"]) %>%
+      # add predicted labels for rf2 using a 0.5 probability cutoff
+      mutate(predicted_label_rf2 = ifelse(prob_positive_rf2 > 0.5, "win_B", "win_A")) 
+    
+}) %>%
+  # combine the 10 resulting data frames into one
+  purrr::reduce(bind_rows)
+result_df
+```
+Now, let's create a model that predicts error rate based on the method used (rf1 - small RF, rf2 - big RF). Our null hypothesis is as follows: There is no difference in error rate between a random forest classifier with ntree=16 and a RF with ntree=512.
+
+```{r}
+err_df <- result_df %>%
+  mutate(error_rf = observed_label != predicted_label_rf,
+         error_rf2 = observed_label != predicted_label_rf2) %>%
+  group_by(fold) %>%
+  summarize(rf = mean(error_rf), rf2 = mean(error_rf2)) %>%
+  tidyr::gather(model, error, -fold)
+err_df
+
+err_df %>%
+  lm(error~model, data=.) %>%
+  broom::tidy()
+```
+
+The resulting linear model for error is $$y = \beta_0 + \beta_1X,$$ where y represents the error rate and X represents whether the big RF (rf2) was used (0 or 1). Because the model does not include a term for the small RF (rf), its error rate is indicated by the intercept $\beta_0$. When X=1, big RF was used, meaning that its error rate is indicated by the value $\beta_0 + \beta_1$. The error rate for the small RF is $y = \beta_0 = 0.3185$, while the error rate for random forest is $y = \beta_0 + \beta_1 = 0.2855$ It is important to note that the p-value for the estimate $\beta_1$ is 1.99e-02, which is significant at a significance level of .05. But because the estimate for $\beta_1 = -0.0330$ is small, the model suggests that there is little difference in error rate when using a big random forest versus a small one. Therefore, we should fail to reject the null hypothesis that there is a difference in error rates between a random forest with ntree=16 and one with ntree=512.
+
+Let's plot a ROC (Receiver Operating Characteristic) curve for each of the classifiers. The ROC curve plots the true positive rate versus the false positive rate for different cutoff points called thresholds. The AUROC (area under ROC) is a measure of discrimination, the ability of the classifier to correctly classify positive examples and not incorrectly classify negative examples. You can read more about ROC curves here: http://gim.unmc.edu/dxtests/roc3.htm.
+
+```{r}
+library(ROCR)
+
+labels <- split(result_df$observed_label, result_df$fold)
+
+predictions_rf <- split(result_df$prob_positive_rf, result_df$fold) %>% prediction(labels)
+predictions_rf2 <- split(result_df$prob_positive_rf2, result_df$fold) %>% prediction(labels)
+
+mean_auc_rf <- predictions_rf %>%
+  performance(measure="auc") %>%
+  slot("y.values") %>% unlist() %>% 
+  mean()
+
+mean_auc_rf2 <- predictions_rf2 %>%
+  performance(measure="auc") %>%
+  slot("y.values") %>% unlist() %>% 
+  mean()
+
+predictions_rf %>%
+  performance(measure="tpr", x.measure="fpr") %>%
+  plot(avg="threshold", col="green", lwd=2)
+
+predictions_rf2 %>%
+  performance(measure="tpr", x.measure="fpr") %>%
+  plot(avg="threshold", col="red", lwd=2, add=TRUE)
+
+legend("bottomright",
+       legend=paste(c("ntree=16", "ntree=512"), "AUC:", round(c(mean_auc_rf, mean_auc_rf2), digits=3)),
+       col=c("green", "red"), lty=1:1)
+title(main="ROC Curves for RF Classifiers")
+```
+
+The AUROC for the small RF is 0.751, whereas the AUROC for the big RF is 0.787. While the AUROC for the big RF is slightly higher, the difference is quite small (0.787 - 0.751 = 0.036), meaning that the discrimination power of each random forest classifier is about the same. The difference in accuracy is small as well (0.033): acc(small rf) = 1 - 0.3185 = 0.6815, acc(big rf) = 1 - 0.2855 = 0.7145.
+
+# Conclusions
+
+Based on our results, we can claim (for the subset of data we looked at):
+
+* The younger fighter wins 63.36% of the time, and is typically 2 years younger than his opponent.
+* The taller fighter wins roughly 56% of the time.
+* The fighter with longer reach wins roughly 55% of the time.
+* A boxer's reach is linearly correlated with height.
+* The victorious boxer typically has a ~1 cm height/reach advantage over his opponent.
+* A random forest classifier with .7145 accuracy and AUROC of 0.787.
+* Increasing the number of trees in a RF classifier does not significantly change the error rate.
+
+### Further Questions  
+- Does the more experienced boxer (number of matches) win more often against a less experienced one?  
+- How well do other classification algorithms perform on this dataset? 
+- How do we equalize the class ratio without losing too much data?
+
